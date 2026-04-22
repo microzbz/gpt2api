@@ -47,16 +47,16 @@ type RunOptions struct {
 	ModelID           uint64
 	UpstreamModel     string // 默认 "auto"(由上游根据 system_hints 挑选图像模型)
 	Prompt            string
-	N                 int                // 目前上游单次返回固定,N 仅用于计费
-	MaxAttempts       int                // 灰度未命中时最大重试,默认 2
-	PerAttemptTimeout time.Duration      // 单次尝试总超时,默认 5min
-	PollMaxWait       time.Duration      // 轮询最长等待,默认 300s
-	References        []ReferenceImage   // 图生图/编辑:参考图
+	N                 int              // 目前上游单次返回固定,N 仅用于计费
+	MaxAttempts       int              // 灰度未命中时最大重试,默认 2
+	PerAttemptTimeout time.Duration    // 单次尝试总超时,默认 5min
+	PollMaxWait       time.Duration    // 轮询最长等待,默认 300s
+	References        []ReferenceImage // 图生图/编辑:参考图
 }
 
 // RunResult 是单次生图的输出。
 type RunResult struct {
-	Status         string   // success / failed
+	Status         string // success / failed
 	ConversationID string
 	AccountID      uint64
 	FileIDs        []string // chatgpt.com 侧的原始 ref("sed:" 前缀表示 sediment)
@@ -64,9 +64,9 @@ type RunResult struct {
 	ContentTypes   []string
 	ErrorCode      string
 	ErrorMessage   string
-	Attempts       int   // 跨账号尝试次数(runOnce 次数)
-	TurnsInConv    int   // 当前账号内同会话 picture_v2 轮次
-	IsPreview      bool  // true=返回的是 IMG1 sediment 预览(3 轮均未命中 IMG2 灰度,已尽力)
+	Attempts       int  // 跨账号尝试次数(runOnce 次数)
+	TurnsInConv    int  // 当前账号内同会话 picture_v2 轮次
+	IsPreview      bool // true=返回的是 IMG1 sediment 预览(3 轮均未命中 IMG2 灰度,已尽力)
 	DurationMs     int64
 }
 
@@ -469,16 +469,23 @@ loop:
 			zap.Int("sids", len(lastPreviewSids)))
 	}
 
-	// 8) 对每个 ref 取签名 URL
+	// 8) 对每个 ref 取签名 URL,最终最多返回 opt.N 张。
+	// 上游可能在同一轮里给出多张 preview/final 混合产物;OpenAI 兼容层应遵守
+	// 调用方请求的 n,避免 n=1 却返回 2 张图片 URL。
+	var selectedRefs []string
 	var signedURLs []string
 	var contentTypes []string
 	for _, ref := range fileRefs {
+		if opt.N > 0 && len(signedURLs) >= opt.N {
+			break
+		}
 		url, err := cli.ImageDownloadURL(ctx, convID, ref)
 		if err != nil {
 			logger.L().Warn("image runner download url failed",
 				zap.String("ref", ref), zap.Error(err))
 			continue
 		}
+		selectedRefs = append(selectedRefs, ref)
 		signedURLs = append(signedURLs, url)
 		contentTypes = append(contentTypes, "image/png")
 	}
@@ -498,12 +505,14 @@ loop:
 		zap.String("conv_id", convID),
 		zap.Int("turns_used", result.TurnsInConv),
 		zap.Bool("is_preview", result.IsPreview),
-		zap.Int("refs", len(fileRefs)),
+		zap.Int("requested_n", opt.N),
+		zap.Int("upstream_refs", len(fileRefs)),
+		zap.Int("refs", len(selectedRefs)),
 		zap.Strings("refs_list", fileRefs),
 		zap.Int("signed_count", len(signedURLs)),
 	)
 
-	result.FileIDs = fileRefs
+	result.FileIDs = selectedRefs
 	result.SignedURLs = signedURLs
 	result.ContentTypes = contentTypes
 	return true, "", nil

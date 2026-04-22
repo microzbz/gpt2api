@@ -29,7 +29,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -72,6 +74,38 @@ func BuildImageProxyURL(taskID string, idx int, ttl time.Duration) string {
 	expMs := time.Now().Add(ttl).UnixMilli()
 	sig := computeImgSig(taskID, idx, expMs)
 	return fmt.Sprintf("/p/img/%s/%d?exp=%d&sig=%s", taskID, idx, expMs, sig)
+}
+
+// BuildImageProxyURLWithBase 在相对路径基础上,按 API Base URL 生成完整可访问地址。
+// 若 baseURL 为空或非法,回退为相对路径,兼容同源前端直接使用。
+func BuildImageProxyURLWithBase(baseURL, taskID string, idx int, ttl time.Duration) string {
+	path := BuildImageProxyURL(taskID, idx, ttl)
+	base := normalizeImageProxyBaseURL(baseURL)
+	if base == "" {
+		return path
+	}
+	return base + path
+}
+
+func normalizeImageProxyBaseURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		raw = strings.TrimRight(raw, "/")
+		return strings.TrimSuffix(raw, "/v1")
+	}
+	path := strings.TrimRight(u.Path, "/")
+	if strings.HasSuffix(path, "/v1") {
+		path = strings.TrimSuffix(path, "/v1")
+	}
+	u.Path = path
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
+	return strings.TrimRight(u.String(), "/")
 }
 
 func computeImgSig(taskID string, idx int, expMs int64) string {

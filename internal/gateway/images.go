@@ -45,6 +45,9 @@ type ImagesHandler struct {
 	*Handler
 	Runner *image.Runner
 	DAO    *image.DAO
+	// ImageBaseURL 用于把签名图片代理路径拼成完整 URL。
+	// 由启动配置 app.base_url 注入,为空时回退为相对路径。
+	ImageBaseURL string
 	// ImageAccResolver 可选:代理下载上游图片时用于解出账号 AT/cookies/proxy。
 	// 未注入时 /p/img 路径会返回 503。
 	ImageAccResolver ImageAccountResolver
@@ -85,6 +88,14 @@ type ImageGenResponse struct {
 	// IsPreview=true 表示本次账号未命中 IMG2 灰度,返回的是 IMG1 预览图。
 	// 前端可据此给用户一个"本次未使用 IMG2 生成"之类的软提示。
 	IsPreview bool `json:"is_preview,omitempty"`
+}
+
+func (h *ImagesHandler) imageProxyURL(taskID string, idx int) string {
+	baseURL := ""
+	if h != nil {
+		baseURL = h.ImageBaseURL
+	}
+	return BuildImageProxyURLWithBase(baseURL, taskID, idx, ImageProxyTTL)
 }
 
 // ImageGenerations POST /v1/images/generations。
@@ -298,7 +309,7 @@ func (h *ImagesHandler) ImageGenerations(c *gin.Context) {
 		Data:      make([]ImageGenData, 0, len(res.SignedURLs)),
 	}
 	for i := range res.SignedURLs {
-		d := ImageGenData{URL: BuildImageProxyURL(taskID, i, ImageProxyTTL)}
+		d := ImageGenData{URL: h.imageProxyURL(taskID, i)}
 		if i < len(res.FileIDs) {
 			d.FileID = strings.TrimPrefix(res.FileIDs[i], "sed:")
 		}
@@ -341,7 +352,7 @@ func (h *ImagesHandler) ImageTask(c *gin.Context) {
 	data := make([]ImageGenData, 0, len(urls))
 	fileIDs := t.DecodeFileIDs()
 	for i := range urls {
-		d := ImageGenData{URL: BuildImageProxyURL(t.TaskID, i, ImageProxyTTL)}
+		d := ImageGenData{URL: h.imageProxyURL(t.TaskID, i)}
 		if i < len(fileIDs) {
 			d.FileID = strings.TrimPrefix(fileIDs[i], "sed:")
 		}
@@ -349,14 +360,14 @@ func (h *ImagesHandler) ImageTask(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"task_id":          t.TaskID,
-		"status":           t.Status,
-		"conversation_id":  t.ConversationID,
-		"created":          t.CreatedAt.Unix(),
-		"finished_at":      nullableUnix(t.FinishedAt),
-		"error":            t.Error,
-		"credit_cost":      t.CreditCost,
-		"data":             data,
+		"task_id":         t.TaskID,
+		"status":          t.Status,
+		"conversation_id": t.ConversationID,
+		"created":         t.CreatedAt.Unix(),
+		"finished_at":     nullableUnix(t.FinishedAt),
+		"error":           t.Error,
+		"credit_cost":     t.CreditCost,
+		"data":            data,
 	})
 }
 
@@ -810,7 +821,7 @@ func (h *ImagesHandler) ImageEdits(c *gin.Context) {
 		Data:      make([]ImageGenData, 0, len(res.SignedURLs)),
 	}
 	for i := range res.SignedURLs {
-		d := ImageGenData{URL: BuildImageProxyURL(taskID, i, ImageProxyTTL)}
+		d := ImageGenData{URL: h.imageProxyURL(taskID, i)}
 		if i < len(res.FileIDs) {
 			d.FileID = strings.TrimPrefix(res.FileIDs[i], "sed:")
 		}

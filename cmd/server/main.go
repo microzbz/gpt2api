@@ -144,9 +144,10 @@ func main() {
 	imageDAO := image.NewDAO(sqldb)
 	imageRunner := image.NewRunner(sched, imageDAO)
 	imagesH := &gateway.ImagesHandler{
-		Handler: gwH,
-		Runner:  imageRunner,
-		DAO:     imageDAO,
+		Handler:      gwH,
+		Runner:       imageRunner,
+		DAO:          imageDAO,
+		ImageBaseURL: cfg.App.BaseURL,
 	}
 	gwH.Images = imagesH // chat/completions 识别到图像模型时转派
 
